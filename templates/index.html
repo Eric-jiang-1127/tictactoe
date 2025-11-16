@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>Tic Tac Toe</title>
+  <style>
+    body { display:flex; flex-direction:column; align-items:center; font-family:Arial, sans-serif; background:#111; color:#fff; padding:20px; }
+    canvas { background:#000; margin:12px 0; }
+    .controls { display:flex; gap:12px; margin-bottom:10px; }
+    button { padding:8px 12px; font-size:16px; }
+    #title { margin-bottom:6px; font-size:20px; }
+  </style>
+</head>
+<body>
+  <div id="title">Choose side</div>
+  <div class="controls">
+    <button id="playX">Play as X</button>
+    <button id="playO">Play as O</button>
+    <button id="reset" style="display:none">Play Again</button>
+  </div>
+  <canvas id="board" width="480" height="480"></canvas>
+
+<script>
+const X = "X", O = "O", EMPTY = null;
+const n = 3;
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+const cell = canvas.width / n;
+
+let board = Array.from({length:n}, ()=> Array.from({length:n}, ()=> EMPTY));
+let user = null;     // null 表示尚未选择
+let aiThinking = false;
+
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.strokeStyle = "#888";
+  ctx.lineWidth = 3;
+  for(let i=1;i<n;i++){
+    ctx.beginPath(); ctx.moveTo(i*cell,0); ctx.lineTo(i*cell,canvas.height); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,i*cell); ctx.lineTo(canvas.width,i*cell); ctx.stroke();
+  }
+  ctx.fillStyle = "#fff";
+  ctx.font = Math.floor(cell*0.6) + "px sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for(let i=0;i<n;i++){
+    for(let j=0;j<n;j++){
+      const v = board[i][j];
+      if (v !== null) ctx.fillText(v, j*cell + cell/2, i*cell + cell/2);
+    }
+  }
+}
+
+function winner(b){
+  for(let i=0;i<n;i++){
+    const first = b[i][0];
+    if (first !== null && b[i].every(x=>x===first)) return first;
+  }
+  for(let j=0;j<n;j++){
+    const first = b[0][j];
+    if (first !== null && Array.from({length:n}, (_,i)=>b[i][j]).every(x=>x===first)) return first;
+  }
+  let first = b[0][0];
+  if (first !== null && Array.from({length:n}, (_,i)=>b[i][i]).every(x=>x===first)) return first;
+  first = b[0][n-1];
+  if (first !== null && Array.from({length:n}, (_,i)=>b[i][n-1-i]).every(x=>x===first)) return first;
+  return null;
+}
+
+function isFull(b){
+  return b.every(row => row.every(c => c !== null));
+}
+
+function updateTitle(){
+  const title = document.getElementById("title");
+  const w = winner(board);
+  if (w !== null){
+    title.textContent = "Game Over: " + w + " wins.";
+    document.getElementById("reset").style.display = "inline-block";
+  } else if (isFull(board)){
+    title.textContent = "Game Over: Tie.";
+    document.getElementById("reset").style.display = "inline-block";
+  } else if (user === null){
+    title.textContent = "Choose side";
+  } else {
+    const cur = countX(board) > countO(board) ? O : X;
+    if (user === cur){
+      title.textContent = "Play as " + user;
+    } else {
+      title.textContent = "Computer thinking...";
+    }
+    document.getElementById("reset").style.display = "none";
+  }
+}
+
+function countX(b){ let c=0; b.forEach(r=>r.forEach(v=>{ if (v===X) c++; })); return c; }
+function countO(b){ let c=0; b.forEach(r=>r.forEach(v=>{ if (v===O) c++; })); return c; }
+
+canvas.addEventListener("click", async (ev)=>{
+  if (user === null) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = ev.clientX - rect.left, y = ev.clientY - rect.top;
+  const j = Math.floor(x / cell), i = Math.floor(y / cell);
+  if (board[i][j] !== null) return;
+  const cur = (countX(board) > countO(board)) ? O : X;
+  if (user !== cur) return; // 不是用户回合
+  board[i][j] = user;
+  draw();
+  updateTitle();
+  await maybeAiMove();
+});
+
+async function maybeAiMove(){
+  const w = winner(board);
+  if (w !== null || isFull(board)) return;
+  const cur = (countX(board) > countO(board)) ? O : X;
+  if (cur === user) return;
+  aiThinking = true;
+  updateTitle();
+  // 小延迟模拟 runner 中的等待
+  await new Promise(r=>setTimeout(r, 400));
+  try {
+    const resp = await fetch("/api/ai", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ board })
+    });
+    const json = await resp.json();
+    if (json.move){
+      const [mi,mj] = json.move;
+      board[mi][mj] = cur;
+    }
+  } catch(e){
+    console.error(e);
+  } finally {
+    aiThinking = false;
+    draw();
+    updateTitle();
+  }
+}
+
+document.getElementById("playX").addEventListener("click", ()=>{
+  user = X;
+  board = Array.from({length:n}, ()=> Array.from({length:n}, ()=> EMPTY));
+  draw(); updateTitle();
+  // X 先手，用户先行
+});
+
+document.getElementById("playO").addEventListener("click", async ()=>{
+  user = O;
+  board = Array.from({length:n}, ()=> Array.from({length:n}, ()=> EMPTY));
+  draw(); updateTitle();
+  // O 先让 AI 先走一次
+  await maybeAiMove();
+});
+
+document.getElementById("reset").addEventListener("click", ()=>{
+  user = null;
+  board = Array.from({length:n}, ()=> Array.from({length:n}, ()=> EMPTY));
+  draw(); updateTitle();
+  document.getElementById("reset").style.display = "none";
+});
+
+draw();
+updateTitle();
+</script>
+</body>
+</html>
